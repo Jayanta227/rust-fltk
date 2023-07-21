@@ -1,0 +1,20 @@
+[package]
+name = "appimage-launcher"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+#rand = "0.8.5"
+#fltk-flex = "0.2"
+#run_script = "0.10.1"
+#fork = "0.1.22"
+
+fltk = { version = "1.4.4", features = ["fltk-bundled"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
