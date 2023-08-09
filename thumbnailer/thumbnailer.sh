@@ -18,7 +18,7 @@ while : ; do
     [ -z "$icon_path"  ] && break
 done
 
-convert squashfs-root/.DirIcon -resize "$SIZE" "$OUT"
+# convert squashfs-root/.DirIcon -resize "$SIZE" "$OUT"
 rm -r squashfs-root
 
 

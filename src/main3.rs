@@ -1,0 +1,218 @@
+use fltk::{
+    enums::{CallbackTrigger, Event},
+    prelude::{ImageExt, *},
+    *, group::{Flex, Pack, PackType},
+};
+
+use std::fs;
+use std::process::{exit, Command, Stdio};
+mod refresh;
+use refresh::create_thumbnails;
+
+const W: i32 = 900;
+const H: i32 = 600;
+
+#[derive(Clone, Copy)]
+enum Message {
+    Filter,
+    Select,
+    OpenFile,
+    Refresh,
+    KeyInput(enums::Key),
+    Close,
+    // flex_inner_left_resize,
+}
+
+fn main() {
+    //vector for storing the appimage names
+    let mut model = Vec::new();
+    let appimages_path = "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string();
+
+    let paths = match fs::read_dir(&appimages_path) {
+        Ok(path) => path,
+        Err(_) => {
+            exit(1);
+        }
+    };
+
+    for path in paths {
+        let mut extension = String::new();
+        let path = path.unwrap();
+        if path.file_type().unwrap().is_file() {
+            extension = match path.path().extension() {
+                Some(ext) => ext.to_str().unwrap().to_string(),
+                None => "others".to_string(),
+            };
+        };
+        //check the extension of the file and add it to the vector
+        if extension == "appimage" || extension == "AppImage" {
+            model.push(path.file_name().to_str().unwrap().to_string());
+        }
+    }
+
+    let a = app::App::default().with_scheme(app::Scheme::Gtk);
+    let mut wind = window::Window::default().with_label("Appimages").with_size(W, H).center_screen();
+    wind.make_resizable(true);
+    let mut flex_outer = Flex::default().with_pos(0, 0).size_of_parent().row();
+    let mut pack_inner_left = Pack::default().with_pos(0, 0)
+    .with_type(PackType::Vertical)
+    .with_size(200, flex_outer.height());
+    // pack_inner_left.auto_layout();
+    
+
+    let (sender, receiver) = app::channel::<Message>();
+    sender.send(Message::Filter);
+
+    let mut filter_input = input::Input::default().with_label("search").with_size(20, 200);
+    let mut list_browser = browser::HoldBrowser::default().with_size(20, 200);
+
+    // flex_inner_left.fixed(&mut filter_input, 30i32);
+    pack_inner_left.end();
+
+
+    // divider
+    let mut divider = frame::Frame::default();
+    flex_outer.fixed(&divider, 30);
+
+
+    list_browser.handle(move |_wi, ev| match ev {
+        Event::KeyDown => {
+            if app::event_key() == enums::Key::Enter {
+                sender.send(Message::OpenFile);
+            };
+            true
+        }
+        _ => false,
+    });
+    
+    list_browser.emit(sender, Message::Select);
+    filter_input.set_trigger(CallbackTrigger::Changed);
+    filter_input.emit(sender, Message::Filter);
+
+    filter_input.handle(move |_, ev| match ev {
+        Event::KeyDown => {
+            sender.send(Message::KeyInput(app::event_key()));
+            true
+        }
+        _ => false,
+    });
+
+    let mut flex_inner_right = Flex::default().column();
+
+    
+    let mut fr = frame::Frame::default();
+    let mut button_refresh = button::Button::default().with_label("Refresh");
+
+    button_refresh.set_callback(move |_| {
+        sender.send(Message::Refresh);
+    });
+    flex_inner_right.fixed(&button_refresh, 30i32);
+    flex_inner_right.end();
+
+    
+    // flex_outer.fixed(&mut flex_inner_right, W/3);
+    flex_outer.end();
+    let mut image_logo = image::SharedImage::load("src/logo.png").unwrap();
+    image_logo.scale(200, 200, true, true);
+    fr.set_image(Some(image_logo));
+    flex_outer.end();
+
+    // wind.set_border(false);
+    wind.end();
+    wind.show();
+    wind.handle(move |_, ev| match ev{
+        Event::Unfocus => {
+            sender.send(Message::Close);
+            true
+        },
+        _ => true,
+    });
+
+    divider.handle({
+        let mut x = 0;
+        let mut y = 0;
+        move |w, ev| match ev {
+            enums::Event::Push => {
+                let coords = app::event_coords();
+                x = coords.0;
+                y = coords.1;
+                true
+            }
+            enums::Event::Drag => {
+                // w.set_pos(app::event_x_root() - x, app::event_y_root() - y);
+                // flex_outer.fixed(flex_inner_left, );
+                pack_inner_left.set_size(flex_outer.width() - x, flex_outer.height());
+                println!("dragged");
+                // flex_inner_left_resize(x, y);
+           true
+            }
+            _ => false,
+        }
+    });
+
+
+
+
+
+
+    while a.wait() {
+        match receiver.recv() {
+            Some(Message::Filter) => {
+                let prefix = filter_input.value().to_lowercase();
+                list_browser.clear();
+                for item in &model {
+                    if item.to_lowercase().starts_with(&prefix) {
+                        list_browser.add(item);
+                    }
+                }
+                list_browser.select(1);
+            }
+
+            Some(Message::Select) => {
+                if list_browser.value() != 0 {
+                    println!(
+                        "{:?}",
+                        match list_browser.selected_text() {
+                            Some(s) => {
+                                s
+                            }
+                            None => {
+                                "not selected".to_string()
+                            }
+                        }
+                    );
+                }
+            }
+            Some(Message::Refresh) => {
+                create_thumbnails(&appimages_path);
+            }
+
+            // handle opening the selected appimage
+            Some(Message::OpenFile) => {
+                Command::new(appimages_path.clone()+&list_browser.selected_text().unwrap())
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()
+                .expect("some err");
+                exit(0);
+            }
+            Some(Message::KeyInput(key)) => {
+                if key == enums::Key::Enter {
+                    sender.send(Message::OpenFile);
+                } else if key == enums::Key::Down {
+                    list_browser.select(list_browser.value() + 1);
+                } else if key == enums::Key::Up {
+                    list_browser.select(list_browser.value() - 1);
+                }
+            },
+
+            Some(Message::Close) => {
+                // wind.hide();
+                // exit(1);
+            }
+
+            None => {}
+        }
+    }
+}

@@ -48,7 +48,7 @@ fn main() {
         appimage_clone.remove(0);
         appimage_clone.push_str(".png");
 
-        appimage_clone = "./out".to_string()+&appimage_clone;
+        appimage_clone = "./.icons".to_string()+&appimage_clone;
 
 
         let mut cmd = Command::new("./thumbnailer.sh").arg(&appimage)
