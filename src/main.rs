@@ -1,11 +1,11 @@
 use fltk::{
     enums::{CallbackTrigger, Event},
-    group::{Flex, Pack, PackType},
+    group::{Flex},
     prelude::{ImageExt, *},
     *, window::DoubleWindow,
 };
 
-use std::{fs, path::Path, fmt::format};
+use std::{fs, path::Path,error::Error};
 use std::process::{exit, Command, Stdio};
 mod refresh;
 use refresh::create_thumbnails;
@@ -21,13 +21,14 @@ enum Message {
     Refresh,
     KeyInput(enums::Key),
     Close,
+    ChangeDir,
     // flex_inner_left_resize,
 }
 
 fn main() {
         //vector for storing the appimage names
         let mut model = Vec::new();
-        let appimages_path = "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string();
+        let mut appimages_path = "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string();
     
         let paths = match fs::read_dir(&appimages_path) {
             Ok(path) => path,
@@ -82,34 +83,41 @@ fn main() {
     let mut fr = frame::Frame::default();
     
 
-    // let binding = appimages_path.clone() + &list_browser.selected_text().unwrap();
-    // let appimage_name = Path::new(&binding).file_stem().unwrap();
-    // let binding = appimages_path.clone()+&((".icons".to_string()+appimage_name.to_str().unwrap()).to_string()+".png");
-    // let appimage_logo_path =Path::new(&binding);
-    
-    
-    // let mut image_logo = image::SharedImage::load(appimage_logo_path.to_str().unwrap()).unwrap();
-    // image_logo.scale(200, 200, true, true);
-    // fr.set_image(Some(image_logo));
-
-    let mut refresh_img = |list_browser: &mut browser::HoldBrowser, wind: &mut DoubleWindow|{
-        let binding = format!("{}{}{}",appimages_path.clone(),"/",list_browser.selected_text().unwrap());
+    let mut refresh_img_handler = |appimages_path: &String, list_browser: &mut browser::HoldBrowser, wind: &mut DoubleWindow, fr: &mut frame::Frame| -> Result<(), Box<dyn Error>>{
+        let binding = format!("{}{}{}",appimages_path.clone(),"/",list_browser.selected_text().unwrap_or_default());
         // appimages_path.clone().push_str("/") + &list_browser.selected_text().unwrap();
         let appimage_name = Path::new(&binding).file_stem().unwrap();
         let binding = appimages_path.clone()+&(("/.icons/".to_string()+appimage_name.to_str().unwrap()).to_string()+".png");
         let appimage_logo_path =Path::new(&binding);
         
-        let mut image_logo = image::SharedImage::load(appimage_logo_path.to_str().unwrap()).unwrap();
+        let mut image_logo = image::SharedImage::load(appimage_logo_path.to_str().unwrap())?;
         image_logo.scale(200, 200, true, true);
         fr.set_image(Some(image_logo));
-        wind.redraw()
+        fr.set_label("");
+        wind.redraw();
+        Ok(())
     };
 
+    let mut refresh_img = |appimages_path: &String, list_browser: &mut browser::HoldBrowser, wind: &mut DoubleWindow|{
+        // let fr1 = &fr;
+        if let Err(_err) =  refresh_img_handler(&appimages_path, list_browser, wind, &mut fr) {
+            let mut err_logo = image::SharedImage::load("./src/err.png").unwrap();
+            fr.set_image(Some(err_logo));
+            fr.set_label("refresh to generate thumbnail");
+            wind.redraw();
+        }
+    };
 
     let mut button_refresh = button::Button::default().with_label("Refresh");
     flex_inner_right.fixed(&mut button_refresh, 35i32);
     button_refresh.set_callback(move |_| {
         sender.send(Message::Refresh);
+    });
+
+    let mut button_change_appimage_dir = button::Button::default().with_label("Change directory");
+    flex_inner_right.fixed(&mut button_change_appimage_dir, 35i32);
+    button_change_appimage_dir.set_callback(move |_| {
+        sender.send(Message::ChangeDir);
     });
     flex_outer.fixed(&mut flex_inner_right, W/3);
     flex_inner_right.end();
@@ -130,8 +138,7 @@ fn main() {
     filter_input.set_trigger(CallbackTrigger::Changed);
     filter_input.emit(sender, Message::Filter);
     //list browser events
-    list_browser.emit(sender, Message::Filter);
-    // refresh_img(&mut list_browser, &mut wind);
+    list_browser.emit(sender, Message::Select);
 
 
 
@@ -178,6 +185,45 @@ fn main() {
 
     wind.end();
     wind.show();
+    wind.handle(move |w, evt| match evt {
+        // close the window when it no longer has focus
+        enums::Event::Unfocus => {
+                // if app::screen_coords().x() < w.x() {
+                //     println!("{:?}{}", app::screen_coords(), w.x());
+                //     sender.send(Message::Close);
+                // }
+
+            true
+        }
+        _ => false,
+    });
+
+
+    /*
+    // Popup window to restrict user interaction during background refresh
+    let mut popup = window::MenuWindow::default().with_size(150, 60);
+    let mut content = frame::Frame::default()
+    .size_of_parent()
+    .center_of_parent()
+    .with_label("This is a popup");
+content.set_frame(enums::FrameType::BorderBox);
+popup.end();
+
+    // this function sets the NOBORDER and OVERRIDE flags
+    // NOTE: this is not currently exposed in the rust binding
+    popup.set_override();
+    
+    popup.handle(|p, evt| match evt {
+        enums::Event::Push => {
+            p.hide();
+            // stop the popup window from intercepting all events
+            app::set_grab::<window::MenuWindow>(None);
+            true
+        }
+        _ => false,
+    });
+    */
+
 
     while a.wait() {
         match receiver.recv() {
@@ -190,26 +236,26 @@ fn main() {
                     }
                 }
                 list_browser.select(1);
-                refresh_img(&mut list_browser, &mut wind);
+                refresh_img(&appimages_path,&mut list_browser, &mut wind);
             }
 
             Some(Message::Select) => {
                 if list_browser.value() != 0 {
+                    refresh_img(&appimages_path, &mut list_browser, &mut wind);
                     println!(
-                        "{:?}",
-                        match list_browser.selected_text() {
-                            Some(s) => {
-                                s
-                            }
-                            None => {
-                                "not selected".to_string()
-                            }
-                        }
+                        "{:?}", list_browser.selected_text().unwrap()
                     );
                 }
             }
             Some(Message::Refresh) => {
-                create_thumbnails(&appimages_path);
+                let appimages_path_copy = appimages_path.clone();
+                create_thumbnails(&appimages_path_copy);
+                filter_input.take_focus().unwrap();
+                // popup.set_pos(50, 50);
+                // popup.show();
+                // set popup window to intercept other events
+                // app::set_grab(Some(popup.clone()));
+
             }
 
             // handle opening the selected appimage
@@ -227,17 +273,27 @@ fn main() {
                     sender.send(Message::OpenFile);
                 } else if key == enums::Key::Down {
                     list_browser.select(list_browser.value() + 1);
-                    refresh_img(&mut list_browser, &mut wind);
+                    refresh_img(&appimages_path, &mut list_browser, &mut wind);
                     
                 } else if key == enums::Key::Up {
                     list_browser.select(list_browser.value() - 1);
-                    refresh_img(&mut list_browser, &mut wind);
+                    refresh_img(&appimages_path, &mut list_browser, &mut wind);
 
-                }
+                } else if key == enums::Key::Escape {
+                    wind.hide();
+
+                } 
+            }
+
+            Some(Message::ChangeDir) => {
+                let mut dialog = dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
+                dialog.show();
+                appimages_path = dialog.filename().to_str().unwrap().to_string();
+                println!("{}", appimages_path);
             }
 
             Some(Message::Close) => {
-                // wind.hide();
+                wind.hide();
                 // exit(1);
             }
 
