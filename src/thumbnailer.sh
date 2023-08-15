@@ -17,7 +17,6 @@ while : ; do
     icon_path="$(readlink "squashfs-root/$icon_path")"
     [ -z "$icon_path"  ] && break
 done
-
 convert squashfs-root/.DirIcon -resize "$SIZE" "$OUT"
 rm -r squashfs-root
 

@@ -4,7 +4,9 @@ use fltk::{
     prelude::{ImageExt, *},
     *, window::DoubleWindow,
 };
-
+use std::{fs::{File, OpenOptions}, io::Read, path, ffi::FromBytesWithNulError};
+use serde::{Serialize, Deserialize};
+use std::io::BufWriter;
 use std::{fs, path::Path,error::Error};
 use std::process::{exit, Command, Stdio};
 mod refresh;
@@ -12,6 +14,21 @@ use refresh::create_thumbnails;
 
 const W: i32 = 900;
 const H: i32 = 600;
+
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {
+    appimages_path: String,
+    icons_dir: String,
+}
+
+fn load_config() -> Result<Config, Box<dyn Error>> {
+    let mut config_file = File::open("config.json")?;
+    let mut contents = String::new();
+    config_file.read_to_string(&mut contents)?;
+    let config: Config = serde_json::from_str(&contents)?;
+    Ok(config)
+}
 
 #[derive(Clone, Copy)]
 enum Message {
@@ -26,17 +43,104 @@ enum Message {
 }
 
 fn main() {
+    let mut a = app::App::default().with_scheme(app::Scheme::Gtk);
+    let mut appimages_path: String = "".to_string();
+    let mut icons_dir: String = "".to_string();
+    let (sender, receiver) = app::channel::<Message>();
         //vector for storing the appimage names
         let mut model = Vec::new();
-        let mut appimages_path = "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string();
-    
+        
+        
+        if let Ok(config) = load_config() {
+            appimages_path = config.appimages_path;
+            icons_dir = config.icons_dir;
+        } else {
+            let mut config_window = window::Window::default().with_label("Config").with_size(W, H).center_screen();
+            let mut pack1 = group::Pack::default()
+            .with_size(3*W/4 - 50 - 10, 250)
+            .with_pos(50, 50)
+            .with_type(group::PackType::Vertical);
+            pack1.set_spacing(5);
+            let mut appimages_path_input = input::FileInput::default().with_size(0, 30);
+            appimages_path_input.deactivate();
+            let mut icons_dir_input = input::FileInput::default().with_size(0, 30);
+            icons_dir_input.deactivate();
+            pack1.end();
+
+            let mut pack2 = group::Pack::default()
+            .with_size(W/4 - pack1.x(), 250)
+            .with_pos(3*W/4, 50)
+            .with_type(group::PackType::Vertical);
+            pack2.set_spacing(5);
+            let mut btn1 = button::Button::default().with_size(0, 30).with_label("appimage dir");
+            let mut btn2 = button::Button::default().with_size(0, 30).with_label("icons dir");
+            pack2.end();
+
+            let mut pack3 = group::Pack::default()
+            .with_size(200, 30)
+            .with_pos(W/2 - 100, 250)
+            .with_type(group::PackType::Horizontal);
+            pack3.set_spacing(50);
+            let mut btn_cancel = button::Button::default().with_size(100, 0).with_label("Cancel");
+            let mut btn_ok = button::Button::default().with_size(100, 0).with_label("OK");
+            pack3.end();
+
+            
+
+                btn1.set_callback(move |_| {
+                let mut dialog = dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
+                dialog.show();
+                appimages_path = dialog.filename().to_str().unwrap().to_string();
+                appimages_path_input.set_value(&appimages_path);
+
+            });
+
+            btn2.set_callback(move |_| {
+                let mut dialog = dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
+                dialog.show();
+                icons_dir = dialog.filename().to_str().unwrap().to_string();
+                icons_dir_input.set_value(&icons_dir);
+            });
+            btn_cancel.set_callback(
+                move |btn| {
+                    btn.window().unwrap().hide();
+                }
+            );
+
+            btn_ok.set_callback(move |_| {
+                let mut config_file = OpenOptions::new().write(true).create(true).open("config.json");
+                // let mut config: Config = Config {
+                //     appimages_path: appimages_path,
+                //     icons_dir: icons_dir,
+                // };
+            });
+
+            config_window.end();
+            config_window.make_modal(true);
+            config_window.show();
+            while config_window.shown() {
+                app::wait();
+            } 
+
+        }
+        
+        let mut appimages_path = match load_config() {
+            Ok(config) => {config.appimages_path},
+            Err(_) => {"/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string()},
+        };
+        // let mut appimages_path = "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string();
+        let icons_dir = match load_config() {
+            Ok(config) => {config.icons_dir},
+            Err(_) => {"./src/appimages/.icons/".to_string()}
+        };
+         
         let paths = match fs::read_dir(&appimages_path) {
             Ok(path) => path,
             Err(_) => {
                 exit(1);
             }
         };
-    
+        
         for path in paths {
             let mut extension = String::new();
             let path = path.unwrap();
@@ -51,20 +155,18 @@ fn main() {
                 model.push(path.file_name().to_str().unwrap().to_string());
             }
         }
-
-
-    // define the UI
-    // outermost flex with a rows
-    let mut a = app::App::default().with_scheme(app::Scheme::Gtk);
-    let mut wind = window::Window::default().with_label("Appimages").with_size(W, H).center_screen();
-    let (sender, receiver) = app::channel::<Message>();
-    sender.send(Message::Filter);
-    wind.make_resizable(true);
+        
+        
+        // define the UI
+        // outermost flex with a rows
+        let mut wind = window::Window::default().with_label("Appimages").with_size(W, H).center_screen();
+        sender.send(Message::Filter);
+        wind.make_resizable(true);
     let mut flex_outer = Flex::default().with_pos(0, 0).size_of_parent().row();
 
     // left inner flex
     let mut flex_inner_left = Flex::default().with_pos(0, 0).column();
-
+    
     // filter input and list browser in the left inner flex
     let mut filter_input = input::Input::default().with_label("Search");
     let mut list_browser = browser::HoldBrowser::default();
@@ -249,7 +351,7 @@ popup.end();
             }
             Some(Message::Refresh) => {
                 let appimages_path_copy = appimages_path.clone();
-                create_thumbnails(&appimages_path_copy);
+                create_thumbnails(&appimages_path_copy, &icons_dir, &mut model);
                 filter_input.take_focus().unwrap();
                 // popup.set_pos(50, 50);
                 // popup.show();
