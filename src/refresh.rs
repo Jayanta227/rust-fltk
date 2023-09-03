@@ -1,12 +1,8 @@
-use std::env;
 use std::fs;
-use std::io;
 use std::path::Path;
 use std::process::Command;
-use std::process::Stdio;
-use std::process::exit;
 
-pub fn create_thumbnails(appimages_path: &str, icons_dir: &String, model: &mut Vec<String>) {
+pub fn create_thumbnails(appimages_path: &str, icons_dir: &str, model: &mut Vec<String>) {
     /*
     let mut model: Vec<String> = Vec::new();
     // let mut tmp_path: String;
@@ -36,20 +32,27 @@ pub fn create_thumbnails(appimages_path: &str, icons_dir: &String, model: &mut V
     }
     */    
 
-    println!("{:?}", model);
+    // println!("{:?}", model);
     for appimage in model {
-        let mut appimage_clone = appimage.clone();
-        let appimage_file_name = Path::new(&appimage).file_stem().unwrap().to_str().unwrap().to_string();
+        // let mut appimage_clone = appimage.clone();
+        let appimage_file_stem = Path::new(&appimage).file_stem().unwrap().to_str().unwrap();
         // appimage_clone.remove(0);
-        appimage_clone = format!("{}{}", icons_dir, &appimage_file_name);
-        appimage_clone.push_str(".png");
+        let mut thumbnail_out = format!("{}{}{}", icons_dir,"/",&appimage_file_stem);
+        thumbnail_out.push_str(".png");
 
+        let appimage_file = format!("{}{}{}",appimages_path,"/",Path::new(&appimage).file_name().unwrap().to_str().unwrap());
+        // println!("{}",appimage_file);
 
-
-        let mut cmd = Command::new("./src/thumbnailer.sh")
-        .arg(&appimage) //first argument of the thumbnailer.sh
-        .arg(appimage_clone) //second argument of the thumbnailer.sh
-        .arg("200x200") //third argument of the thumbnailer.sh
+        // create icons_dir if not exists
+        if !Path::new(icons_dir).exists() {
+            fs::create_dir(icons_dir).unwrap();
+        }
+        // println!("debug :{}", &appimage);
+        let mut cmd = Command::new("././thumbnailer.sh")
+        .arg(appimage_file) //first argument of the thumbnailer.sh for the appimage path
+        .arg(thumbnail_out) //second argument for the thumbnail output dir
+        .arg("200x200") //third argument for the thumbnail size
+        .arg(appimages_path)
         .spawn().expect("some error");
 
         cmd.wait().unwrap();

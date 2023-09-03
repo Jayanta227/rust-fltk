@@ -6,20 +6,18 @@ use fltk::{
     *,
 };
 use serde::{Deserialize, Serialize};
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::process::{exit, Command, Stdio};
-use std::{error::Error, fs, path::Path};
+use std::{error::Error, fs, path::Path, env};
 use std::{
-    ffi::FromBytesWithNulError,
     fs::{File, OpenOptions},
     io::Read,
-    path,
 };
 mod refresh;
 use lazy_static::lazy_static;
 use refresh::create_thumbnails;
 // use once_cell::sync::Lazy;
-use std::cell::Cell;
+// use std::cell::Cell;
 use std::sync::Mutex;
 
 lazy_static! {
@@ -37,36 +35,29 @@ struct Config {
     icons_dir: String,
 }
 
+fn config_dir() -> String{
+    let mut home_dir = match env::home_dir() {
+        Some(path) => path.to_str().unwrap().to_string(),
+        None => "/home/".to_string(),
+    };
+    if home_dir.ends_with('/') {
+        home_dir.to_string().pop();
+        format!("{}{}", home_dir, "/.config/appimage-launcher")
+    } else {
+        format!("{}{}", home_dir, "/.config/appimage-launcher")
+    }
+}
+
 fn load_config() -> Result<Config, Box<dyn Error>> {
-    let mut config_file = File::open("config.json")?;
+    let mut config_file = File::open(config_dir())?;
     let mut contents = String::new();
     config_file.read_to_string(&mut contents)?;
     let config: Config = serde_json::from_str(&contents)?;
     Ok(config)
 }
 
-#[derive(Clone, Copy)]
-enum Message {
-    Filter,
-    Select,
-    OpenFile,
-    Refresh,
-    KeyInput(enums::Key),
-    Close,
-    ChangeDir,
-}
-
-fn main() {
-    let mut a = app::App::default().with_scheme(app::Scheme::Gtk);
-    let (sender, receiver) = app::channel::<Message>();
-    //vector for storing the appimage names
-    let mut model = Vec::new();
-
-
-    if let Ok(config) = load_config() {
-        *appimages_path.lock().unwrap() = config.appimages_path;
-        *icons_dir.lock().unwrap() = config.icons_dir;
-    } else {
+fn refresh_popup() {
+    {
         let mut config_window = window::Window::default()
             .with_label("Config")
             .with_size(W, H)
@@ -107,16 +98,12 @@ fn main() {
         pack3.end();
 
         btn1.set_callback({
-            // let mut appimages_path_ref = appimages_path.lock().unwrap();
             move |_| {
                 let mut dialog =
                     dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
                 dialog.show();
-                // appimages_path = dialog.filename().to_str().unwrap().to_string();
                 let dialog_value = dialog.filename().to_str().unwrap().to_string();
                 appimages_path_input.set_value(&dialog_value);
-                // sender.send(Message::SetAppImgPath(dialog_value.clone().as_str()));
-                // *appimages_path_ref = dialog_value;
                 *appimages_path.lock().unwrap() = dialog_value;
             }
         });
@@ -126,7 +113,6 @@ fn main() {
                 dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
             dialog.show();
             *icons_dir.lock().unwrap() = dialog.filename().to_str().unwrap().to_string();
-            // let temp = *icons_dir.lock().unwrap().clone();
             icons_dir_input.set_value(icons_dir.lock().unwrap().clone().as_str());
         });
         btn_cancel.set_callback(move |btn| {
@@ -134,8 +120,7 @@ fn main() {
         });
 
         btn_ok.set_callback(move |btn| {
-            // sender.send(Message::Dump_Config);
-            let mut config: Config = Config {
+            let config: Config = Config {
                 appimages_path: appimages_path.lock().unwrap().to_string(),
                 icons_dir: icons_dir.lock().unwrap().to_string(),
             };
@@ -143,10 +128,11 @@ fn main() {
             let mut config_file = OpenOptions::new()
                 .write(true)
                 .create(true)
-                .open("config.json").unwrap();
+                .open(config_dir())
+                .unwrap();
             // write data to config.json
             write!(&mut config_file, "{}", data).unwrap();
-            println!("{}", data);
+            // println!("{}", data);
             btn.window().unwrap().hide();
         });
 
@@ -157,14 +143,50 @@ fn main() {
             app::wait();
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum Message {
+    Filter,
+    Select,
+    OpenFile,
+    Refresh,
+    KeyInput(enums::Key),
+    Close,
+    ChangeDir,
+}
+
+fn main() {
+    let a = app::App::default().with_scheme(app::Scheme::Gtk);
+    let (sender, receiver) = app::channel::<Message>();
+    //vector for storing the appimage names
+    let mut model = Vec::new();
+
+    if let Ok(mut config) = load_config() {
+        //remove trailing slash in appimages_path if exists
+        *appimages_path.lock().unwrap() = if config.appimages_path.ends_with("/") {
+            config.appimages_path.pop();
+            config.appimages_path
+        } else {
+            config.appimages_path
+        };
+        *icons_dir.lock().unwrap() = if config.icons_dir.ends_with("/") {
+            config.icons_dir.pop();
+            config.icons_dir
+        } else {
+            config.icons_dir
+        };
+    } else {
+        refresh_popup();
+    }
 
     *appimages_path.lock().unwrap() = match load_config() {
         Ok(config) => config.appimages_path,
-        Err(_) => "/home/jayanta/Desktop/learning/rst/appimage-launcher/src/appimages".to_string(),
+        Err(_) => "./".to_string(),
     };
     *icons_dir.lock().unwrap() = match load_config() {
         Ok(config) => config.icons_dir,
-        Err(_) => "./src/appimages/.icons/".to_string(),
+        Err(_) => "./.icons".to_string(),
     };
 
     let paths = match fs::read_dir(&*appimages_path.lock().unwrap().to_string()) {
@@ -197,6 +219,8 @@ fn main() {
         .center_screen();
     sender.send(Message::Filter);
     wind.make_resizable(true);
+    //make window borderless
+    wind.set_border(false);
     let mut flex_outer = Flex::default().with_pos(0, 0).size_of_parent().row();
 
     // left inner flex
@@ -219,7 +243,7 @@ fn main() {
     let mut flex_inner_right = Flex::default().column();
     let mut fr = frame::Frame::default();
 
-    let mut refresh_img_handler = |list_browser: &mut browser::HoldBrowser,
+    let refresh_img_handler = |list_browser: &mut browser::HoldBrowser,
                                    wind: &mut DoubleWindow,
                                    fr: &mut frame::Frame|
      -> Result<(), Box<dyn Error>> {
@@ -229,12 +253,19 @@ fn main() {
             "/",
             list_browser.selected_text().unwrap_or_default()
         );
-        // appimages_path.clone().push_str("/") + &list_browser.selected_text().unwrap();
         let appimage_name = Path::new(&binding).file_stem().unwrap();
-        let binding = appimages_path.lock().unwrap().clone().to_string()
-            + &(("/.icons/".to_string() + appimage_name.to_str().unwrap()).to_string() + ".png");
-        let appimage_logo_path = Path::new(&binding);
+        // let mut binding = appimages_path.lock().unwrap().clone().to_string()
+        // + &(("/.icons/".to_string() + appimage_name.to_str().unwrap()).to_string() + ".png");
 
+        let binding = format!(
+            "{}{}{}{}",
+            &*icons_dir.lock().unwrap().clone().to_string(),
+            "/",
+            appimage_name.to_str().unwrap(),
+            ".png"
+        );
+
+        let appimage_logo_path = Path::new(&binding);
         let mut image_logo = image::SharedImage::load(appimage_logo_path.to_str().unwrap())?;
         image_logo.scale(200, 200, true, true);
         fr.set_image(Some(image_logo));
@@ -246,14 +277,14 @@ fn main() {
     let mut refresh_img = |list_browser: &mut browser::HoldBrowser, wind: &mut DoubleWindow| {
         // let fr1 = &fr;
         if let Err(_err) = refresh_img_handler(list_browser, wind, &mut fr) {
-            let mut err_logo = image::SharedImage::load("./src/err.png").unwrap();
+            let err_logo = image::SharedImage::load("././err.png").unwrap();
             fr.set_image(Some(err_logo));
             fr.set_label("refresh to generate thumbnail");
             wind.redraw();
         }
     };
 
-    let mut button_refresh = button::Button::default().with_label("Refresh");
+    let mut button_refresh = button::Button::default().with_label("Refresh thumbnails");
     flex_inner_right.fixed(&mut button_refresh, 35i32);
     button_refresh.set_callback(move |_| {
         sender.send(Message::Refresh);
@@ -264,9 +295,14 @@ fn main() {
     button_change_appimage_dir.set_callback(move |_| {
         sender.send(Message::ChangeDir);
     });
+
+    let mut button_quit = button::Button::default().with_label("Quit");
+    flex_inner_right.fixed(&mut button_quit, 35i32);
+    button_quit.set_callback(move |_| {
+        sender.send(Message::Close);
+    });
     flex_outer.fixed(&mut flex_inner_right, W / 3);
     flex_inner_right.end();
-
     flex_outer.end();
 
     // handle events
@@ -275,6 +311,16 @@ fn main() {
     filter_input.emit(sender, Message::Filter);
     //list browser events
     list_browser.emit(sender, Message::Select);
+    list_browser.handle(move |_, ev| match ev {
+        //check if its a doubleclick event
+        Event::Push => {
+            if app::event_clicks(){
+                sender.send(Message::OpenFile);
+            };
+            true
+        }
+        _ => false,
+    });
 
     // handle events by closure
     // filter input
@@ -316,7 +362,7 @@ fn main() {
 
     wind.end();
     wind.show();
-    wind.handle(move |w, evt| match evt {
+    wind.handle(move |_w, evt| match evt {
         // close the window when it no longer has focus
         enums::Event::Unfocus => {
             // if app::screen_coords().x() < w.x() {
@@ -371,25 +417,24 @@ fn main() {
             Some(Message::Select) => {
                 if list_browser.value() != 0 {
                     refresh_img(&mut list_browser, &mut wind);
-                    println!("{:?}", list_browser.selected_text().unwrap());
+                    // println!("{:?}", list_browser.selected_text().unwrap());
                 }
             }
             Some(Message::Refresh) => {
-                let appimages_path_copy = appimages_path.lock().unwrap().to_string();
-                let mut icons_dir_copy = icons_dir.lock().unwrap().to_string();
-                create_thumbnails(&appimages_path_copy, &icons_dir_copy, &mut model);
+                let appimages_path_copy = &*appimages_path.lock().unwrap().to_string();
+                let icons_dir_copy = &*icons_dir.lock().unwrap().to_string();
+                create_thumbnails(&appimages_path_copy, icons_dir_copy, &mut model);
                 filter_input.take_focus().unwrap();
-                // popup.set_pos(50, 50);
-                // popup.show();
-                // set popup window to intercept other events
-                // app::set_grab(Some(popup.clone()));
             }
 
             // handle opening the selected appimage
             Some(Message::OpenFile) => {
-                Command::new(
-                    appimages_path.lock().unwrap().clone() + &list_browser.selected_text().unwrap(),
-                )
+                Command::new(format!(
+                    "{}{}{}",
+                    &*appimages_path.lock().unwrap().clone(),
+                    "/",
+                    &list_browser.selected_text().unwrap()
+                ))
                 .stdin(Stdio::null())
                 .stderr(Stdio::null())
                 .stdout(Stdio::null())
@@ -412,10 +457,11 @@ fn main() {
             }
 
             Some(Message::ChangeDir) => {
-                let mut dialog =
-                    dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
-                dialog.show();
-                *appimages_path.lock().unwrap() = dialog.filename().to_str().unwrap().to_string();
+                // let mut dialog =
+                //     dialog::NativeFileChooser::new(dialog::NativeFileChooserType::BrowseDir);
+                // dialog.show();
+                // *appimages_path.lock().unwrap() = dialog.filename().to_str().unwrap().to_string();
+                refresh_popup();
             }
 
             Some(Message::Close) => {
